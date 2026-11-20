@@ -3,6 +3,8 @@
 Sistema de visão computacional que analisa vídeos de treino de boxe, identifica golpes, postura e movimentação, e gera observações técnicas para ajudar o atleta a evoluir.
 
 > **Status:** em desenvolvimento (Marco 0). Implementado até agora: extração de landmarks de vídeo. A detecção de jab e as demais funcionalidades descritas abaixo **ainda não existem**.
+>
+> Os testes de integração com o MediaPipe real (`tests/test_extract_real.py`) estão **pulados** até a gravação de uma nova amostra seguindo o [protocolo de gravação](docs/protocolo-gravacao.md). A primeira amostra foi gravada de frente e sem o corpo inteiro, fora do protocolo, e deixou de ser usada nos testes.
 
 ## Objetivo
 
@@ -28,7 +30,7 @@ Saída:
 Interface: linha de comando (CLI).
 
 ```bash
-boxing-vision analyze treino.mp4 --stance orthodox --output resultados/
+boxing-vision analyze treino.mp4 --stance southpaw --output resultados/
 ```
 
 ## O que o v0.1 não faz
@@ -91,6 +93,8 @@ python -m pytest
 - Velocidades são relativas (pixels por segundo normalizados), não velocidade física real.
 - As regras ainda não foram validadas por um treinador de boxe. Toda observação vem com nível de confiança e deve ser tratada como sugestão.
 - Trechos em que o atleta sai do quadro ou fica oculto são marcados como não analisáveis.
+- O Marco 0 é avaliado apenas com atleta canhoto (mão direita na frente), filmado em diagonal de ~45°. Outras bases e ângulos não têm resultado medido ([ADR 003](docs/adr/003-base-canhota-no-marco-0.md)).
+- A visibilidade informada pelo MediaPipe não garante que o ponto esteja na posição certa. No vídeo frontal, o punho em guarda chegou a ser marcado fora do lugar com visibilidade 0,97.
 
 ## Dados e privacidade
 
@@ -105,8 +109,10 @@ python -m pytest
 | [`docs/criterios-aceitacao.md`](docs/criterios-aceitacao.md) | Como saber que cada funcionalidade está pronta |
 | [`docs/adr/001-maquina-de-estados-no-marco-0.md`](docs/adr/001-maquina-de-estados-no-marco-0.md) | Máquina de estados em vez de modelo treinado |
 | [`docs/adr/002-azure-como-nuvem-alvo.md`](docs/adr/002-azure-como-nuvem-alvo.md) | Azure como nuvem alvo, Marco 0 local |
+| [`docs/adr/003-base-canhota-no-marco-0.md`](docs/adr/003-base-canhota-no-marco-0.md) | Base canhota no Marco 0 e base explícita na extração |
+| [`docs/protocolo-gravacao.md`](docs/protocolo-gravacao.md) | Como gravar os vídeos de calibração e de teste |
 
-Planejados: protocolo de gravação e rotulagem, arquitetura e relatório de resultados do Marco 0.
+Planejados: protocolo de rotulagem, arquitetura e relatório de resultados do Marco 0.
 
 ## Autor
 

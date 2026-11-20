@@ -10,12 +10,16 @@ Começamos por um único objetivo: **identificar corretamente o jab**.
 
 ### Escopo
 
-- Atleta ortodoxo (jab = mão esquerda)
+- Atleta canhoto (base southpaw): jab = mão direita, que é a mão da frente
 - Shadowboxing, uma pessoa, câmera fixa
-- Ângulo frontal ou diagonal (~45°), corpo inteiro visível
+- Diagonal de ~45° pelo lado da mão da frente, corpo inteiro visível, conforme o [protocolo de gravação](protocolo-gravacao.md)
 - Vídeos de 10 a 30 segundos, 30 ou 60 FPS
 
-Fora do escopo: direto, gancho, uppercut, canhoto, saco de pancadas, sparring e avaliação do retorno à guarda.
+Fora do escopo: base ortodoxa, ângulo frontal, direto, gancho, uppercut, saco de pancadas, sparring e avaliação do retorno à guarda.
+
+O código aceita as duas bases (`--stance`), mas só a base canhota é avaliada no Marco 0. Nenhum resultado para atleta ortodoxo pode ser reivindicado sem um conjunto de teste próprio. A decisão está registrada no [ADR 003](adr/003-base-canhota-no-marco-0.md).
+
+Neste documento, "braço da frente" e "mão da frente" se referem ao lado definido pela base: direito no Marco 0.
 
 ### Eventos
 
@@ -71,7 +75,7 @@ O conjunto de teste deve conter, além de jabs, movimentos que podem confundir o
 | Direto (mão de trás) | Golpe parecido com a outra mão |
 | Guarda parada | Linha de base sem movimento |
 | Movimentação de pés | Deslocamento do corpo sem golpe |
-| Estender a mão esquerda sem golpear | Extensão lenta, sem intenção de golpe |
+| Estender a mão da frente sem golpear | Extensão lenta, sem intenção de golpe |
 | Ajuste de guarda | Movimento curto da mão da frente |
 | Finta de jab | Início de jab interrompido |
 | Jab com extensão parcial | Caso limite entre jab e finta (rotular como jab ou negativo e documentar o critério) |
@@ -153,7 +157,7 @@ Jabs perdidos por falha de pose **continuam contando como falso negativo** na m�
 - Verificado por teste automatizado
 
 **CA-07: Trechos não analisáveis**
-- Frames em que `confianca_pose` do braço esquerdo fica abaixo do limite configurado são marcados como `nao_analisavel`
+- Frames em que `confianca_pose` do braço da frente fica abaixo do limite configurado são marcados como `nao_analisavel`
 - Nenhum jab é detectado dentro desses trechos
 
 **CA-08: Saída**
