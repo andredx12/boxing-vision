@@ -97,6 +97,7 @@ python -m pytest
 - Trechos em que o atleta sai do quadro ou fica oculto são marcados como não analisáveis.
 - O Marco 0 é avaliado apenas com atleta canhoto (mão direita na frente), filmado em diagonal de ~45°. Outras bases e ângulos não têm resultado medido ([ADR 003](docs/adr/003-base-canhota-no-marco-0.md)).
 - A visibilidade informada pelo MediaPipe não garante que o ponto esteja na posição certa. No vídeo frontal, o punho em guarda chegou a ser marcado fora do lugar com visibilidade 0,97.
+- O `timestamp_ms` do CSV é o tempo real de cada frame gravado no vídeo, então acompanha os frames perdidos pela câmera do celular ([investigação](docs/resultados/fps-variavel.md)). O vídeo de preview, por outro lado, é gravado em FPS constante e serve só para conferência visual: o tempo dele pode se afastar um pouco do original e não deve ser usado como referência.
 - O critério de desempenho CA-09 (no máximo 3 minutos de processamento por minuto de vídeo) **ainda não é atendido** e está em investigação. Nas medições feitas até agora no PC de desenvolvimento, só a extração de landmarks passou desse limite, e o preview aumenta bastante o tempo.
 
 ## Dados e privacidade

@@ -12,7 +12,9 @@ import csv
 import hashlib
 import json
 import math
+import os
 import platform
+import statistics
 import sys
 import time
 from dataclasses import dataclass
@@ -157,6 +159,41 @@ def draw_arms(frame, landmarks, stance: str, low_vis: float) -> None:
             cv2.putText(frame, "FRENTE", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, FRONT_COLOR, 2)
 
 
+def frame_timestamp_ms(pos_msec: float, first_pos_msec: float, prev_ts_ms: int | None,
+                       frame_idx: int) -> int:
+    """Timestamp do frame em ms, relativo ao primeiro frame, validado para o MediaPipe.
+
+    O valor vem do tempo de apresentação gravado no contêiner (CAP_PROP_POS_MSEC),
+    não do relógio da execução, então é reprodutível.
+    """
+    if not math.isfinite(pos_msec):
+        problema = f"CAP_PROP_POS_MSEC devolveu {pos_msec}"
+    else:
+        ts_ms = int(round(pos_msec - first_pos_msec))
+        if prev_ts_ms is None or ts_ms > prev_ts_ms:
+            return ts_ms
+        problema = f"{ts_ms} ms depois de {prev_ts_ms} ms"
+    raise ValueError(
+        f"Timestamp inválido no frame {frame_idx}: {problema}. O MediaPipe exige tempo "
+        "estritamente crescente entre frames. Regrave o vídeo seguindo "
+        "docs/protocolo-gravacao.md; se o problema continuar, reporte o caso com o "
+        "arquivo de vídeo e esta mensagem."
+    )
+
+
+def interval_summary(timestamps: list[int]) -> dict:
+    """Resumo dos intervalos entre frames, para sinalizar vídeos com frames perdidos."""
+    intervals = [b - a for a, b in zip(timestamps, timestamps[1:])]
+    if not intervals:
+        return {"mediana": None, "maximo": None, "acima_50ms": 0}
+    return {
+        # Sempre float: com quantidade par de intervalos a mediana pode ser fracionária
+        "mediana": float(statistics.median(intervals)),
+        "maximo": max(intervals),
+        "acima_50ms": sum(1 for d in intervals if d > 50),
+    }
+
+
 def extract(
     video_path: Path,
     out_dir: Path,
@@ -174,122 +211,150 @@ def extract(
     if not cap.isOpened():
         raise FileNotFoundError(f"Não consegui abrir o vídeo: {video_path}")
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if not fps or not math.isfinite(fps) or fps <= 0:
-        cap.release()
-        # Sem FPS confiável os timestamps seriam inventados
-        raise ValueError(f"FPS inválido ({fps}) no vídeo: {video_path}")
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = video_path.stem
-    csv_path = out_dir / f"{stem}_landmarks.csv"
-    meta_path = out_dir / f"{stem}_meta.json"
+    final = {
+        "csv": out_dir / f"{stem}_landmarks.csv",
+        "preview": out_dir / f"{stem}_preview.mp4",
+        "execucao": out_dir / f"{stem}_execucao.json",
+        "meta": out_dir / f"{stem}_meta.json",
+    }
+    # Tudo é gravado em temporários e só renomeado no fim: uma execução que falha
+    # não apaga nem mistura a saída da execução anterior
+    tmp = {k: p.with_name(p.stem + ".tmp" + p.suffix) for k, p in final.items()}
 
     writer_video = None
-    if preview:
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer_video = cv2.VideoWriter(
-            str(out_dir / f"{stem}_preview.mp4"), fourcc, fps, (width, height)
-        )
-
+    timestamps: list[int] = []
     total = with_pose = low_vis_frames = 0
     vis_sum = 0.0
     vis_count = 0
     start = time.perf_counter()
 
-    with landmarker_factory(model_path) as landmarker, csv_path.open(
-        "w", newline="", encoding="utf-8"
-    ) as f:
-        writer = csv.writer(f)
-        writer.writerow(build_header())
+    try:
+        try:
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if not fps or not math.isfinite(fps) or fps <= 0:
+                raise ValueError(f"FPS inválido ({fps}) no vídeo: {video_path}")
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
+            if preview:
+                # O preview é gravado em FPS constante e serve só para conferência
+                # visual; o tempo de referência é o timestamp_ms do CSV
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                writer_video = cv2.VideoWriter(str(tmp["preview"]), fourcc, fps, (width, height))
 
-            # Timestamp derivado do índice do frame, não do relógio do decoder,
-            # pra garantir reprodutibilidade
-            ts_ms = int(round(total * 1000.0 / fps))
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            result = landmarker.detect_for_video(mp_image, ts_ms)
+            with landmarker_factory(model_path) as landmarker, tmp["csv"].open(
+                "w", newline="", encoding="utf-8"
+            ) as f:
+                writer = csv.writer(f)
+                writer.writerow(build_header())
+                first_pos = None
 
-            landmarks = result.pose_landmarks[0] if result.pose_landmarks else None
-            writer.writerow(landmarks_to_row(total, ts_ms, landmarks))
+                while True:
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
 
-            # Baixa visibilidade só é contada em frames com pose; frames sem pose
-            # são outra categoria de falha e ficam em frames_sem_pose
-            if landmarks:
-                with_pose += 1
-                arm_vis = [landmarks[i].visibility or 0.0 for i in arm_idxs]
-                vis_sum += sum(arm_vis)
-                vis_count += len(arm_vis)
-                if min(arm_vis) < low_vis:
-                    low_vis_frames += 1
-                if writer_video is not None:
-                    draw_arms(frame, landmarks, stance, low_vis)
+                    pos = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    if first_pos is None:
+                        first_pos = pos
+                    ts_ms = frame_timestamp_ms(
+                        pos, first_pos, timestamps[-1] if timestamps else None, total
+                    )
+                    timestamps.append(ts_ms)
 
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                    result = landmarker.detect_for_video(mp_image, ts_ms)
+
+                    landmarks = result.pose_landmarks[0] if result.pose_landmarks else None
+                    writer.writerow(landmarks_to_row(total, ts_ms, landmarks))
+
+                    # Baixa visibilidade só é contada em frames com pose; frames sem pose
+                    # são outra categoria de falha e ficam em frames_sem_pose
+                    if landmarks:
+                        with_pose += 1
+                        arm_vis = [landmarks[i].visibility or 0.0 for i in arm_idxs]
+                        vis_sum += sum(arm_vis)
+                        vis_count += len(arm_vis)
+                        if min(arm_vis) < low_vis:
+                            low_vis_frames += 1
+                        if writer_video is not None:
+                            draw_arms(frame, landmarks, stance, low_vis)
+
+                    if writer_video is not None:
+                        writer_video.write(frame)
+                    total += 1
+        finally:
+            cap.release()
             if writer_video is not None:
-                writer_video.write(frame)
-            total += 1
+                writer_video.release()
 
-    cap.release()
-    if writer_video is not None:
-        writer_video.release()
+        summary = ExtractionSummary(
+            total_frames=total,
+            frames_with_pose=with_pose,
+            front_arm=side,
+            front_arm_visibility_mean=(vis_sum / vis_count) if vis_count else math.nan,
+            front_arm_low_visibility_frames=low_vis_frames,
+            seconds=time.perf_counter() - start,
+        )
 
-    summary = ExtractionSummary(
-        total_frames=total,
-        frames_with_pose=with_pose,
-        front_arm=side,
-        front_arm_visibility_mean=(vis_sum / vis_count) if vis_count else math.nan,
-        front_arm_low_visibility_frames=low_vis_frames,
-        seconds=time.perf_counter() - start,
-    )
+        meta = {
+            "video": video_path.name,
+            "video_sha256": file_sha256(video_path),
+            "fps": fps,
+            "largura": width,
+            "altura": height,
+            "frames": total,
+            "duracao_s": round(total / fps, 3),
+            "origem_timestamp": "CAP_PROP_POS_MSEC",
+            "intervalo_frames_ms": interval_summary(timestamps),
+            "modelo": model_path.name,
+            "modelo_sha256": file_sha256(model_path),
+            "mediapipe_versao": mp.__version__,
+            "opencv_versao": cv2.__version__,
+            "opcoes_landmarker": LANDMARKER_OPTIONS,
+            "base": stance,
+            "braco_frente": side,
+            "limite_visibilidade": low_vis,
+            "frames_com_pose": with_pose,
+            "frames_sem_pose": summary.frames_without_pose,
+            "taxa_pose": round(summary.pose_rate, 4),
+            # Média calculada apenas sobre os frames com pose
+            "visibilidade_media_braco_frente": round(summary.front_arm_visibility_mean, 4)
+            if vis_count
+            else None,
+            "frames_braco_frente_baixa_visibilidade": low_vis_frames,
+        }
+        tmp["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    meta = {
-        "video": video_path.name,
-        "video_sha256": file_sha256(video_path),
-        "fps": fps,
-        "largura": width,
-        "altura": height,
-        "frames": total,
-        "duracao_s": round(total / fps, 3),
-        "modelo": model_path.name,
-        "modelo_sha256": file_sha256(model_path),
-        "mediapipe_versao": mp.__version__,
-        "opencv_versao": cv2.__version__,
-        "opcoes_landmarker": LANDMARKER_OPTIONS,
-        "base": stance,
-        "braco_frente": side,
-        "limite_visibilidade": low_vis,
-        "frames_com_pose": with_pose,
-        "frames_sem_pose": summary.frames_without_pose,
-        "taxa_pose": round(summary.pose_rate, 4),
-        # Média calculada apenas sobre os frames com pose
-        "visibilidade_media_braco_frente": round(summary.front_arm_visibility_mean, 4)
-        if vis_count
-        else None,
-        "frames_braco_frente_baixa_visibilidade": low_vis_frames,
-    }
-    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Dados que mudam a cada execução ficam separados do resultado reprodutível
+        execucao = {
+            "executado_em": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "tempo_processamento_s": round(summary.seconds, 2),
+            "segundos_por_minuto_de_video": round(summary.seconds / (total / fps / 60), 2)
+            if total
+            else None,
+            "python": platform.python_version(),
+            "sistema": platform.platform(),
+            "processador": platform.processor(),
+        }
+        tmp["execucao"].write_text(
+            json.dumps(execucao, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    except BaseException:
+        for p in tmp.values():
+            p.unlink(missing_ok=True)
+        raise
 
-    # Dados que mudam a cada execução ficam separados do resultado reprodutível
-    execucao = {
-        "executado_em": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "tempo_processamento_s": round(summary.seconds, 2),
-        "segundos_por_minuto_de_video": round(summary.seconds / (total / fps / 60), 2)
-        if total
-        else None,
-        "python": platform.python_version(),
-        "sistema": platform.platform(),
-        "processador": platform.processor(),
-    }
-    (out_dir / f"{stem}_execucao.json").write_text(
-        json.dumps(execucao, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    # O meta antigo sai primeiro e o novo entra por último: se o _meta.json
+    # existe, a execução que gerou os outros arquivos foi completa.
+    # os.replace sobrescreve o destino também no Windows, ao contrário de os.rename
+    final["meta"].unlink(missing_ok=True)
+    for key in ("csv", "preview", "execucao", "meta"):
+        if tmp[key].exists():
+            os.replace(tmp[key], final[key])
     return summary
 
 
@@ -304,7 +369,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", type=Path, default=Path("saida/landmarks"))
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
-    parser.add_argument("--preview", action="store_true", help="gera MP4 com os dois braços desenhados")
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="gera MP4 com os dois braços desenhados, em FPS constante, só para conferência visual",
+    )
     parser.add_argument("--low-vis", type=float, default=0.5)
     args = parser.parse_args(argv)
 

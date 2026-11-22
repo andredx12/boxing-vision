@@ -39,7 +39,7 @@ Os frames de manuseio da câmera no início e no fim não têm pose útil. O tre
 - Gravar em 30 ou 60 FPS, com taxa fixa se o celular permitir.
 - Registrar a configuração usada.
 
-> **Pendente:** os vídeos de celular gravados até agora têm FPS médio não inteiro (29,38 a 29,94), o que indica taxa de quadros variável. O extrator calcula o timestamp como índice do frame dividido pelo FPS médio, o que pode se afastar do tempo real ao longo do vídeo e afetar a tolerância de 200 ms da regra de correspondência. A decisão sobre como tratar isso no código ainda não foi tomada.
+> **Taxa de quadros variável:** os vídeos de celular gravados até agora têm FPS médio não inteiro (29,38 a 29,94), porque a câmera perde frames. Calcular o timestamp como índice do frame dividido pelo FPS médio chegou a errar 209 ms em relação ao tempo real. Por isso o extrator usa o tempo de cada frame gravado no vídeo (`CAP_PROP_POS_MSEC`), o mesmo relógio usado na rotulagem, e falha com erro explícito se esse tempo não for estritamente crescente. A investigação está em [`docs/resultados/fps-variavel.md`](resultados/fps-variavel.md).
 
 ## Registro por clipe
 
