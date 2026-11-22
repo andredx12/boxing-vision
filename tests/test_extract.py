@@ -74,12 +74,36 @@ def test_timestamps_do_video_sintetico(run_extract):
 
 # Metadados
 
-@pytest.mark.parametrize("stance, braco", [("orthodox", "left"), ("southpaw", "right")])
+@pytest.mark.parametrize("stance, braco", [("orthodox", "esquerda"), ("southpaw", "direita")])
 def test_meta_registra_base_e_braco_frente(run_extract, stance, braco):
+    from boxing_vision import vocabulario
+
     _, _, out = run_extract(stance)
     meta = read_meta(out)
     assert meta["base"] == stance
     assert meta["braco_frente"] == braco
+    # Mesmo vocabulário dos rótulos manuais (campo "mao")
+    assert meta["braco_frente"] == vocabulario.MAO_DA_FRENTE[stance]
+
+
+@pytest.mark.parametrize("stance", BASES)
+def test_braco_frente_e_uma_mao_valida_dos_rotulos(run_extract, stance):
+    from boxing_vision import vocabulario
+
+    _, _, out = run_extract(stance)
+    assert read_meta(out)["braco_frente"] in vocabulario.MAOS
+
+
+@pytest.mark.parametrize("stance", BASES)
+def test_resumo_usa_a_mesma_mao_do_meta(run_extract, stance):
+    summary, _, out = run_extract(stance)
+    assert summary.front_arm == read_meta(out)["braco_frente"]
+
+
+def test_bases_da_extracao_sao_as_do_vocabulario():
+    from boxing_vision import vocabulario
+
+    assert extract_mod.BASES is vocabulario.BASES
 
 
 @pytest.mark.parametrize("stance", BASES)

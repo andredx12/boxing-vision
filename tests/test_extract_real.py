@@ -52,5 +52,5 @@ def test_mediapipe_real_timestamps_do_pts_e_crescentes(tmp_path):
 def test_mediapipe_real_braco_frente_visivel(tmp_path):
     extract(SAMPLE, tmp_path, MODEL, stance=STANCE)
     meta = json.loads((tmp_path / f"{SAMPLE.stem}_meta.json").read_text(encoding="utf-8"))
-    assert meta["braco_frente"] == "right"
+    assert meta["braco_frente"] == "direita"
     assert meta["visibilidade_media_braco_frente"] >= 0.5
