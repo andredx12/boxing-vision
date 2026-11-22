@@ -8,6 +8,7 @@ Regras para gravar os vídeos de calibração e de teste do Marco 0. Um vídeo f
 - O atleta encara um oponente imaginário à frente, **não a câmera**.
 - Câmera fixa (tripé ou apoio), sem tocar nela durante a gravação.
 - Altura aproximada do peito.
+- Distância de ~3 m entre a câmera e o atleta, o suficiente para manter o corpo inteiro no quadro durante a movimentação de pés.
 
 ### Por que diagonal e não frontal
 
@@ -50,6 +51,7 @@ Para cada vídeo, registrar:
 | Data | 2026-11-27 |
 | Base | `southpaw` |
 | Ângulo | diagonal 45°, lado direito |
+| Distância | ~3 m |
 | FPS configurado | 30 |
 | Conjunto | calibração ou teste |
 

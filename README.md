@@ -4,7 +4,7 @@ Sistema de visão computacional que analisa vídeos de treino de boxe, identific
 
 > **Status:** em desenvolvimento (Marco 0). Implementado até agora: extração de landmarks de vídeo. A detecção de jab e as demais funcionalidades descritas abaixo **ainda não existem**.
 >
-> Os testes de integração com o MediaPipe real (`tests/test_extract_real.py`) estão **pulados** até a gravação de uma nova amostra seguindo o [protocolo de gravação](docs/protocolo-gravacao.md). A primeira amostra foi gravada de frente e sem o corpo inteiro, fora do protocolo, e deixou de ser usada nos testes.
+> Os testes de integração com o MediaPipe real (`tests/test_extract_real.py`) estão **pulados** até existir `videos/amostra_diagonal.mp4`, uma nova amostra gravada seguindo o [protocolo de gravação](docs/protocolo-gravacao.md). A primeira amostra foi gravada de frente e sem o corpo inteiro, fora do protocolo, e deixou de ser usada nos testes.
 
 ## Objetivo
 
@@ -78,8 +78,10 @@ Baixe o modelo [pose_landmarker_full.task](https://storage.googleapis.com/mediap
 Extrair landmarks de um vídeo:
 
 ```bash
-python -m boxing_vision.extract videos/treino.mp4 --preview
+python -m boxing_vision.extract videos/treino.mp4 --stance southpaw --preview
 ```
+
+A base (`--stance orthodox|southpaw`) é obrigatória e define o braço da frente, usado nas métricas do `_meta.json` e no preview. O CSV de landmarks é o mesmo para as duas bases ([ADR 003](docs/adr/003-base-canhota-no-marco-0.md)).
 
 Rodar os testes:
 
@@ -95,6 +97,7 @@ python -m pytest
 - Trechos em que o atleta sai do quadro ou fica oculto são marcados como não analisáveis.
 - O Marco 0 é avaliado apenas com atleta canhoto (mão direita na frente), filmado em diagonal de ~45°. Outras bases e ângulos não têm resultado medido ([ADR 003](docs/adr/003-base-canhota-no-marco-0.md)).
 - A visibilidade informada pelo MediaPipe não garante que o ponto esteja na posição certa. No vídeo frontal, o punho em guarda chegou a ser marcado fora do lugar com visibilidade 0,97.
+- O critério de desempenho CA-09 (no máximo 3 minutos de processamento por minuto de vídeo) **ainda não é atendido** e está em investigação. Nas medições feitas até agora no PC de desenvolvimento, só a extração de landmarks passou desse limite, e o preview aumenta bastante o tempo.
 
 ## Dados e privacidade
 
