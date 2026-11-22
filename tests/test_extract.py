@@ -1,6 +1,8 @@
 import csv
 import hashlib
 import json
+import math
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -8,7 +10,13 @@ import pytest
 
 import boxing_vision.extract as extract_mod
 from boxing_vision.extract import build_header, extract
-from conftest import FAKE_MODEL_BYTES, LEFT_WRIST, RIGHT_WRIST, build_landmarks
+from conftest import (
+    FAKE_MODEL_BYTES,
+    LEFT_WRIST,
+    RIGHT_WRIST,
+    FakeLandmarker,
+    build_landmarks,
+)
 
 BASES = ("orthodox", "southpaw")
 
@@ -53,9 +61,15 @@ def test_csv_identico_para_as_duas_bases(run_extract):
     assert (out_o / "clip_landmarks.csv").read_bytes() == (out_s / "clip_landmarks.csv").read_bytes()
 
 
-def test_timestamps_crescentes_e_derivados_do_fps(run_extract):
-    _, fake, _ = run_extract("southpaw")
-    assert fake.timestamps == [round(i * 1000 / 30) for i in range(10)]
+def test_timestamps_do_video_sintetico(run_extract):
+    _, fake, out = run_extract("southpaw")
+    assert len(fake.timestamps) == 10
+    assert fake.timestamps[0] == 0
+    intervalos = [b - a for a, b in zip(fake.timestamps, fake.timestamps[1:])]
+    # Vídeo sintético gravado a 30 FPS constante: ~33 ms entre frames
+    assert all(30 <= d <= 37 for d in intervalos)
+    rows = list(csv.DictReader((out / "clip_landmarks.csv").open(encoding="utf-8")))
+    assert [int(r["timestamp_ms"]) for r in rows] == fake.timestamps
 
 
 # Metadados
@@ -133,6 +147,115 @@ def test_fps_zero_gera_erro_explicito(monkeypatch, fake_model, tmp_path):
     with pytest.raises(ValueError, match="FPS"):
         extract(tmp_path / "clip.mp4", tmp_path / "out", fake_model, stance="southpaw",
                 landmarker_factory=lambda _: pytest.fail("não deveria abrir o modelo"))
+
+
+# Timestamp real do frame (docs/resultados/fps-variavel.md)
+
+# Intervalo inicial de 120 ms e um frame perdido (salto de 66 ms) entre os frames 3 e 4
+PTS_COM_FRAME_PERDIDO = [0.0, 120.0, 153.3, 186.6, 253.2, 286.4]
+
+
+def run_fake_capture(fake_capture, video, out, model, pos_msec, preview=False):
+    cap = fake_capture(pos_msec)
+    fake = FakeLandmarker()
+    extract(video, out, model, stance="southpaw", preview=preview,
+            landmarker_factory=lambda _: fake)
+    return cap, fake
+
+
+def test_timestamp_vem_do_pts_do_frame(fake_capture, video, fake_model, tmp_path):
+    _, fake = run_fake_capture(fake_capture, video, tmp_path / "out", fake_model,
+                               PTS_COM_FRAME_PERDIDO)
+    esperado = [0, 120, 153, 187, 253, 286]
+    assert fake.timestamps == esperado
+    # O cálculo antigo (índice / FPS médio) daria outros valores
+    assert esperado != [round(i * 1000 / 30) for i in range(6)]
+    rows = list(csv.DictReader((tmp_path / "out" / "clip_landmarks.csv").open(encoding="utf-8")))
+    assert [int(r["timestamp_ms"]) for r in rows] == esperado
+
+
+def test_timestamp_relativo_ao_primeiro_frame(fake_capture, video, fake_model, tmp_path):
+    _, fake = run_fake_capture(fake_capture, video, tmp_path / "out", fake_model,
+                               [1000.0, 1040.0, 1075.0])
+    # Intervalos de 40 e 35 ms: diferentes do cálculo antigo a 30 FPS (0, 33, 67)
+    assert fake.timestamps == [0, 40, 75]
+
+
+@pytest.mark.parametrize(
+    "pos_msec, frame_invalido",
+    [
+        pytest.param([0.0, 33.3, 33.3, 100.0], 2, id="repetido"),
+        pytest.param([0.0, 33.3, 66.7, 0.0, 133.3], 3, id="zerado"),
+        pytest.param([0.0, 0.0, 0.0], 1, id="backend_sem_tempo"),
+        pytest.param([0.0, 33.3, 66.7, 50.0], 3, id="regressivo"),
+        pytest.param([0.0, 33.3, math.nan], 2, id="nan"),
+        pytest.param([0.0, 33.1, 33.4], 2, id="empate_no_arredondamento"),
+    ],
+)
+def test_timestamp_invalido_gera_erro(fake_capture, video, fake_model, tmp_path,
+                                      pos_msec, frame_invalido):
+    fake_capture(pos_msec)
+    fake = FakeLandmarker()
+    with pytest.raises(ValueError, match=f"frame {frame_invalido}\\b") as exc:
+        extract(video, tmp_path / "out", fake_model, stance="southpaw",
+                landmarker_factory=lambda _: fake)
+    mensagem = str(exc.value).lower()
+    assert "regrave" in mensagem and "reporte" in mensagem
+    # O valor inválido nunca chega ao MediaPipe
+    assert len(fake.timestamps) == frame_invalido
+
+
+def test_meta_registra_origem_e_intervalos(fake_capture, video, fake_model, tmp_path):
+    run_fake_capture(fake_capture, video, tmp_path / "out", fake_model, PTS_COM_FRAME_PERDIDO)
+    meta = read_meta(tmp_path / "out")
+    assert meta["origem_timestamp"] == "CAP_PROP_POS_MSEC"
+    # Intervalos: 120, 33, 34, 66, 33
+    assert meta["intervalo_frames_ms"] == {"mediana": 34, "maximo": 120, "acima_50ms": 2}
+
+
+# Falha no meio da extração
+
+PTS_REPETIDO = [0.0, 33.3, 66.7, 66.7, 133.3]
+
+
+def test_erro_no_meio_libera_o_video(fake_capture, video, fake_model, tmp_path):
+    cap = fake_capture(PTS_REPETIDO)
+    fake = FakeLandmarker()
+    with pytest.raises(ValueError):
+        extract(video, tmp_path / "out", fake_model, stance="southpaw", preview=True,
+                landmarker_factory=lambda _: fake)
+    assert cap.liberado
+    # Nenhum arquivo temporário sobra na pasta de saída
+    assert not [p.name for p in (tmp_path / "out").iterdir() if "tmp" in p.name]
+
+
+def test_erro_no_meio_preserva_saida_anterior(fake_capture, video, fake_model, tmp_path):
+    out = tmp_path / "out"
+    run_fake_capture(fake_capture, video, out, fake_model, PTS_COM_FRAME_PERDIDO, preview=True)
+    antes = {p.name: p.read_bytes() for p in out.iterdir()}
+
+    with pytest.raises(ValueError):
+        run_fake_capture(fake_capture, video, out, fake_model, PTS_REPETIDO, preview=True)
+
+    depois = {p.name: p.read_bytes() for p in out.iterdir()}
+    assert depois == antes
+
+
+def test_meta_renomeado_por_ultimo(monkeypatch, run_extract):
+    destinos = []
+    original = extract_mod.os.replace
+
+    def espiao(src, dst):
+        destinos.append(Path(dst).name)
+        return original(src, dst)
+
+    monkeypatch.setattr(extract_mod.os, "replace", espiao)
+    run_extract("southpaw", preview=True)
+    assert set(destinos) == {
+        "clip_landmarks.csv", "clip_preview.mp4", "clip_execucao.json", "clip_meta.json"
+    }
+    # Se o _meta.json existe, a execução foi completa
+    assert destinos[-1] == "clip_meta.json"
 
 
 # Reprodutibilidade (CA-06)

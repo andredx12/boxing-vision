@@ -31,6 +31,10 @@ def build_landmarks(vis: dict[int, float] | None = None, default_vis: float = 0.
     return lms
 
 
+class TimestampNaoCrescente(Exception):
+    """Erro do fake quando recebe timestamp inválido; diferente de ValueError de propósito."""
+
+
 class FakeLandmarker:
     """Roteiro de 10 frames, assimétrico entre os braços.
 
@@ -53,6 +57,9 @@ class FakeLandmarker:
         return False
 
     def detect_for_video(self, image, ts_ms):
+        # O MediaPipe real em modo VIDEO recusa timestamp que não cresce
+        if self.timestamps and ts_ms <= self.timestamps[-1]:
+            raise TimestampNaoCrescente(f"{ts_ms} ms após {self.timestamps[-1]} ms")
         idx = len(self.timestamps)
         self.timestamps.append(ts_ms)
         if idx % 2:
@@ -85,6 +92,55 @@ def fake_model(tmp_path) -> Path:
     path = tmp_path / "fake.task"
     path.write_bytes(FAKE_MODEL_BYTES)
     return path
+
+
+class FakeCapture:
+    """VideoCapture com o tempo de cada frame (CAP_PROP_POS_MSEC) definido por roteiro."""
+
+    def __init__(self, pos_msec, fps=30.0, width=64, height=48):
+        self.pos_msec = list(pos_msec)
+        self.fps = fps
+        self.width = width
+        self.height = height
+        self.frames_lidos = 0
+        self.liberado = False
+
+    def isOpened(self):
+        return True
+
+    def read(self):
+        if self.frames_lidos >= len(self.pos_msec):
+            return False, None
+        self.frames_lidos += 1
+        return True, np.zeros((self.height, self.width, 3), dtype=np.uint8)
+
+    def get(self, prop):
+        if prop == cv2.CAP_PROP_FPS:
+            return self.fps
+        if prop == cv2.CAP_PROP_FRAME_WIDTH:
+            return self.width
+        if prop == cv2.CAP_PROP_FRAME_HEIGHT:
+            return self.height
+        if prop == cv2.CAP_PROP_POS_MSEC:
+            # Como no OpenCV: depois de read(), o tempo do frame que acabou de ser lido
+            return self.pos_msec[self.frames_lidos - 1] if self.frames_lidos else 0.0
+        return 0.0
+
+    def release(self):
+        self.liberado = True
+
+
+@pytest.fixture
+def fake_capture(monkeypatch):
+    """Troca o VideoCapture do extrator por um FakeCapture com o roteiro informado."""
+    import boxing_vision.extract as extract_mod
+
+    def _install(pos_msec, **kwargs):
+        cap = FakeCapture(pos_msec, **kwargs)
+        monkeypatch.setattr(extract_mod.cv2, "VideoCapture", lambda *_: cap)
+        return cap
+
+    return _install
 
 
 @pytest.fixture

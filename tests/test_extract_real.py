@@ -7,6 +7,7 @@ Roda só quando existem o modelo e um vídeo gravado conforme docs/protocolo-gra
 Sem eles, o teste é pulado.
 """
 
+import csv
 import json
 from pathlib import Path
 
@@ -36,6 +37,16 @@ def test_mediapipe_real_reprodutivel(tmp_path):
     stem = SAMPLE.stem
     for name in (f"{stem}_landmarks.csv", f"{stem}_meta.json"):
         assert (tmp_path / "a" / name).read_bytes() == (tmp_path / "b" / name).read_bytes()
+
+
+def test_mediapipe_real_timestamps_do_pts_e_crescentes(tmp_path):
+    extract(SAMPLE, tmp_path, MODEL, stance=STANCE)
+    meta = json.loads((tmp_path / f"{SAMPLE.stem}_meta.json").read_text(encoding="utf-8"))
+    assert meta["origem_timestamp"] == "CAP_PROP_POS_MSEC"
+    with (tmp_path / f"{SAMPLE.stem}_landmarks.csv").open(encoding="utf-8") as f:
+        ts = [int(r["timestamp_ms"]) for r in csv.DictReader(f)]
+    assert ts[0] == 0
+    assert all(b > a for a, b in zip(ts, ts[1:]))
 
 
 def test_mediapipe_real_braco_frente_visivel(tmp_path):
