@@ -1,7 +1,8 @@
 """Carregamento e validação dos rótulos manuais (labels/<video>.json).
 
-As regras seguem docs/protocolo-rotulagem.md. O vocabulário (mão, base, tipos,
-marcações) fica definido aqui para ser importado pelo avaliador.
+As regras seguem docs/protocolo-rotulagem.md. Mãos e bases vêm de
+boxing_vision.vocabulario e continuam acessíveis por aqui. Tipos e marcações
+ficam definidos aqui para serem importados pelo avaliador.
 
 Uso:
     python -m boxing_vision.labels labels/treino_2026-11-27_01.json
@@ -17,18 +18,17 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-# Mão anatômica do atleta, não o lado da imagem
-MAO_DIREITA = "direita"
-MAO_ESQUERDA = "esquerda"
-MAOS = (MAO_DIREITA, MAO_ESQUERDA)
-
-# Bases aceitas (mesmos valores do --stance da extração)
-BASE_ORTODOXA = "orthodox"
-BASE_CANHOTA = "southpaw"
-BASES = (BASE_ORTODOXA, BASE_CANHOTA)
-
-MAO_DA_FRENTE = {BASE_ORTODOXA: MAO_ESQUERDA, BASE_CANHOTA: MAO_DIREITA}
-MAO_DE_TRAS = {BASE_ORTODOXA: MAO_DIREITA, BASE_CANHOTA: MAO_ESQUERDA}
+# Reexportados: quem importa estes nomes de labels continua funcionando
+from boxing_vision.vocabulario import (  # noqa: F401
+    BASE_CANHOTA,
+    BASE_ORTODOXA,
+    BASES,
+    MAO_DA_FRENTE,
+    MAO_DE_TRAS,
+    MAO_DIREITA,
+    MAO_ESQUERDA,
+    MAOS,
+)
 
 CONJUNTOS = ("calibracao", "teste")
 

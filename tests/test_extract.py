@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 import boxing_vision.extract as extract_mod
+from boxing_vision import vocabulario
 from boxing_vision.extract import build_header, extract
 from conftest import (
     FAKE_MODEL_BYTES,
@@ -76,8 +77,6 @@ def test_timestamps_do_video_sintetico(run_extract):
 
 @pytest.mark.parametrize("stance, braco", [("orthodox", "esquerda"), ("southpaw", "direita")])
 def test_meta_registra_base_e_braco_frente(run_extract, stance, braco):
-    from boxing_vision import vocabulario
-
     _, _, out = run_extract(stance)
     meta = read_meta(out)
     assert meta["base"] == stance
@@ -88,8 +87,6 @@ def test_meta_registra_base_e_braco_frente(run_extract, stance, braco):
 
 @pytest.mark.parametrize("stance", BASES)
 def test_braco_frente_e_uma_mao_valida_dos_rotulos(run_extract, stance):
-    from boxing_vision import vocabulario
-
     _, _, out = run_extract(stance)
     assert read_meta(out)["braco_frente"] in vocabulario.MAOS
 
@@ -101,8 +98,6 @@ def test_resumo_usa_a_mesma_mao_do_meta(run_extract, stance):
 
 
 def test_bases_da_extracao_sao_as_do_vocabulario():
-    from boxing_vision import vocabulario
-
     assert extract_mod.BASES is vocabulario.BASES
 
 

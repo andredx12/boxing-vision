@@ -19,12 +19,10 @@ from boxing_vision.labels import (
     SEM_RETORNO,
     TIPOS_NEGATIVOS,
 )
+# Reexportados: quem importa estes nomes de evaluate continua funcionando
+from boxing_vision.vocabulario import STATUS_AMBIGUO, STATUS_DETECTADO  # noqa: F401
 
 LIMITE_MS = 200
-
-# Status de saída do detector (CA-08). Ainda sem módulo próprio
-STATUS_DETECTADO = "detectado"
-STATUS_AMBIGUO = "ambiguo"
 
 # Categorias de falso positivo que não correspondem a um tipo negativo rotulado
 FP_DUPLICADO = "duplicado"

@@ -26,6 +26,8 @@ import mediapipe as mp
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision
 
+from boxing_vision.vocabulario import BASES, MAO_DA_FRENTE, MAO_DIREITA, MAO_ESQUERDA
+
 LANDMARK_NAMES = [
     "nose", "left_eye_inner", "left_eye", "left_eye_outer",
     "right_eye_inner", "right_eye", "right_eye_outer",
@@ -38,14 +40,14 @@ LANDMARK_NAMES = [
     "left_foot_index", "right_foot_index",
 ]
 
-# Ombro, cotovelo e punho de cada lado, com os nomes anatômicos do MediaPipe
-ARMS = {
-    side: tuple(LANDMARK_NAMES.index(f"{side}_{joint}") for joint in ("shoulder", "elbow", "wrist"))
-    for side in ("left", "right")
-}
+# Mão anatômica (vocabulário do projeto) -> prefixo dos landmarks do MediaPipe
+LADO_MEDIAPIPE = {MAO_ESQUERDA: "left", MAO_DIREITA: "right"}
 
-# A base define qual braço fica na frente: ortodoxo = esquerdo, canhoto = direito
-STANCES = {"orthodox": "left", "southpaw": "right"}
+# Ombro, cotovelo e punho de cada mão
+ARMS = {
+    mao: tuple(LANDMARK_NAMES.index(f"{lado}_{joint}") for joint in ("shoulder", "elbow", "wrist"))
+    for mao, lado in LADO_MEDIAPIPE.items()
+}
 
 # Opções explícitas (iguais aos padrões do MediaPipe 0.10.32) para ficarem registradas no meta
 LANDMARKER_OPTIONS = {
@@ -84,13 +86,10 @@ class ExtractionSummary:
 
 
 def front_arm(stance: str) -> str:
-    """Lado do braço da frente ("left" ou "right") para a base informada."""
-    try:
-        return STANCES[stance]
-    except KeyError:
-        raise ValueError(
-            f"stance inválida: {stance!r}. Use uma de: {', '.join(STANCES)}"
-        ) from None
+    """Mão da frente ("direita" ou "esquerda") para a base informada."""
+    if stance not in BASES:
+        raise ValueError(f"stance inválida: {stance!r}. Use uma de: {', '.join(BASES)}")
+    return MAO_DA_FRENTE[stance]
 
 
 def build_header() -> list[str]:
@@ -142,15 +141,15 @@ def draw_arms(frame, landmarks, stance: str, low_vis: float) -> None:
     """
     front = front_arm(stance)
     h, w = frame.shape[:2]
-    for side, idxs in ARMS.items():
+    for mao, idxs in ARMS.items():
         pts = [(int(landmarks[i].x * w), int(landmarks[i].y * h)) for i in idxs]
-        color = FRONT_COLOR if side == front else REAR_COLOR
+        color = FRONT_COLOR if mao == front else REAR_COLOR
         cv2.line(frame, pts[0], pts[1], color, 2)
         cv2.line(frame, pts[1], pts[2], color, 2)
         for i, p in zip(idxs, pts):
             ok = (landmarks[i].visibility or 0.0) >= low_vis
             cv2.circle(frame, p, 6, OK_COLOR if ok else LOW_VIS_COLOR, -1)
-        if side == front:
+        if mao == front:
             wx, wy = pts[2]
             (tw, th), _ = cv2.getTextSize("FRENTE", cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             # Mantém o rótulo dentro do quadro quando o punho está perto da borda
@@ -204,8 +203,8 @@ def extract(
     low_vis: float = 0.5,
     landmarker_factory=create_landmarker,
 ) -> ExtractionSummary:
-    side = front_arm(stance)
-    arm_idxs = ARMS[side]
+    mao_frente = front_arm(stance)
+    arm_idxs = ARMS[mao_frente]
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -294,7 +293,7 @@ def extract(
         summary = ExtractionSummary(
             total_frames=total,
             frames_with_pose=with_pose,
-            front_arm=side,
+            front_arm=mao_frente,
             front_arm_visibility_mean=(vis_sum / vis_count) if vis_count else math.nan,
             front_arm_low_visibility_frames=low_vis_frames,
             seconds=time.perf_counter() - start,
@@ -316,7 +315,7 @@ def extract(
             "opencv_versao": cv2.__version__,
             "opcoes_landmarker": LANDMARKER_OPTIONS,
             "base": stance,
-            "braco_frente": side,
+            "braco_frente": mao_frente,
             "limite_visibilidade": low_vis,
             "frames_com_pose": with_pose,
             "frames_sem_pose": summary.frames_without_pose,
@@ -364,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--stance",
         required=True,
-        choices=list(STANCES),
+        choices=list(BASES),
         help="base do atleta; define o braço da frente (orthodox = esquerdo, southpaw = direito)",
     )
     parser.add_argument("--out", type=Path, default=Path("saida/landmarks"))
@@ -385,8 +384,7 @@ def main(argv: list[str] | None = None) -> int:
         args.video, args.out, args.model,
         stance=args.stance, preview=args.preview, low_vis=args.low_vis,
     )
-    lado = "esquerdo" if s.front_arm == "left" else "direito"
-    print(f"Base: {args.stance} (braço da frente: {lado})")
+    print(f"Base: {args.stance} (braço da frente: {s.front_arm})")
     print(f"Frames: {s.total_frames}")
     print(f"Pose detectada: {s.frames_with_pose} ({s.pose_rate:.1%})")
     print(f"Frames sem pose: {s.frames_without_pose}")
