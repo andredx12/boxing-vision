@@ -101,8 +101,8 @@ A avaliação compara detecções e rótulos com **correspondência um para um**
 - A correspondência é **global** e tem duas prioridades, nesta ordem:
   1. Maximizar o número de pares válidos (dentro de 200 ms)
   2. Entre as soluções com esse número máximo, minimizar a soma das diferenças temporais
-- Implementação: algoritmo húngaro com custo igual à diferença em ms para pares válidos e uma penalidade `M` para pares inválidos, com `M` maior que a soma de todos os custos válidos possíveis. Pares atribuídos com custo `M` são descartados. Um teste unitário cobre o caso em que a escolha gulosa deixaria um jab sem par
-- Empates são resolvidos de forma determinística pela ordem de `inicio_ms`
+- Implementação: programação dinâmica na ordem do tempo, sem dependência nova (ver [ADR 004](adr/004-correspondencia-por-programacao-dinamica.md)). Um teste unitário cobre o caso em que a escolha gulosa deixaria um jab sem par, e outro compara o resultado com uma busca exaustiva
+- Empates são resolvidos de forma determinística pela ordem do centro do evento e depois de `inicio_ms` (para eventos que não se sobrepõem, é a mesma ordem de `inicio_ms`)
 - Detecções duplicadas ou sem rótulo correspondente contam como **falso positivo**
 - Jabs rotulados sem detecção correspondente contam como **falso negativo**
 

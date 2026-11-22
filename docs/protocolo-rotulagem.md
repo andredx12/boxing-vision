@@ -160,6 +160,7 @@ Na versão sem dúvida:
 
 - A correspondência é feita primeiro com todos os eventos, pela regra dos critérios de aceitação
 - Jabs rotulados com `duvida` saem da conta, junto com a detecção que tiver formado par com eles. Se não tiverem par, também não contam como falso negativo
+- Detecções sem par classificadas como duplicadas de um jab com `duvida` (centro a até 200 ms dele, fora de qualquer evento negativo) também saem da conta, em vez de contar como falso positivo
 - Detecções sem par cujo centro cai dentro do intervalo de um evento negativo com `duvida` também saem da conta, em vez de contar como falso positivo
 
 O relatório informa quantos eventos têm `duvida` e mostra as duas versões lado a lado. A métrica principal é sempre a versão com dúvida, pelo mesmo motivo que os jabs perdidos por falha de pose continuam no recall principal: retirar os casos difíceis inflaria o resultado. Uma diferença grande entre as duas versões indica que as regras deste protocolo precisam ficar mais claras antes de gravar mais dados.
