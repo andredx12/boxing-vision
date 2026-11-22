@@ -92,6 +92,32 @@ def front_arm(stance: str) -> str:
     return MAO_DA_FRENTE[stance]
 
 
+def validar_low_vis(low_vis: float) -> float:
+    """Limite de visibilidade, entre 0 e 1 (a escala da visibilidade do MediaPipe)."""
+    # A comparação encadeada também rejeita nan
+    if not 0.0 <= low_vis <= 1.0:
+        raise ValueError(f"low_vis deve estar entre 0 e 1, recebido: {low_vis}")
+    return low_vis
+
+
+def _arg_low_vis(texto: str) -> float:
+    try:
+        return validar_low_vis(float(texto))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{texto!r} inválido: {exc}") from None
+
+
+def frames_declarados(valor: float) -> int | None:
+    """Total de frames declarado pelo contêiner, ou None quando o valor não é utilizável.
+
+    Alguns backends devolvem 0, negativo ou estimativa fracionária quando o contêiner
+    não informa o total; nesses casos nenhum número é registrado.
+    """
+    if not math.isfinite(valor) or valor <= 0 or not float(valor).is_integer():
+        return None
+    return int(valor)
+
+
 def build_header() -> list[str]:
     header = ["frame", "timestamp_ms", "pose_detectada"]
     for name in LANDMARK_NAMES:
@@ -204,6 +230,7 @@ def extract(
     landmarker_factory=create_landmarker,
 ) -> ExtractionSummary:
     mao_frente = front_arm(stance)
+    validar_low_vis(low_vis)
     arm_idxs = ARMS[mao_frente]
 
     cap = cv2.VideoCapture(str(video_path))
@@ -236,12 +263,22 @@ def extract(
                 raise ValueError(f"FPS inválido ({fps}) no vídeo: {video_path}")
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            # Lido antes do laço: depois do release() o OpenCV devolve 0
+            declarados = frames_declarados(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
             if preview:
                 # O preview é gravado em FPS constante e serve só para conferência
                 # visual; o tempo de referência é o timestamp_ms do CSV
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                 writer_video = cv2.VideoWriter(str(tmp["preview"]), fourcc, fps, (width, height))
+                # Checado antes de abrir o modelo: falha cedo, e o except abaixo
+                # remove o arquivo vazio que o OpenCV pode ter deixado
+                if not writer_video.isOpened():
+                    raise RuntimeError(
+                        f"Não consegui criar o vídeo de preview em {tmp['preview']} "
+                        f"(codec mp4v, {width}x{height}, {fps} FPS). Rode sem --preview "
+                        "ou verifique a instalação do OpenCV."
+                    )
 
             with landmarker_factory(model_path) as landmarker, tmp["csv"].open(
                 "w", newline="", encoding="utf-8"
@@ -306,6 +343,9 @@ def extract(
             "largura": width,
             "altura": height,
             "frames": total,
+            # Total declarado pelo contêiner; diferente de "frames" quando o decoder
+            # não entregou todos. None quando o contêiner não informa um total válido
+            "frames_declarados": declarados,
             "duracao_s": round(total / fps, 3),
             "origem_timestamp": "CAP_PROP_POS_MSEC",
             "intervalo_frames_ms": interval_summary(timestamps),
@@ -373,7 +413,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="gera MP4 com os dois braços desenhados, em FPS constante, só para conferência visual",
     )
-    parser.add_argument("--low-vis", type=float, default=0.5)
+    parser.add_argument(
+        "--low-vis",
+        type=_arg_low_vis,
+        default=0.5,
+        help="limite de visibilidade do braço da frente, entre 0 e 1",
+    )
     args = parser.parse_args(argv)
 
     if not args.model.exists():
