@@ -38,6 +38,53 @@ def test_extract_rejeita_base_invalida(run_extract):
         run_extract("canhoto")
 
 
+# Limite de visibilidade
+
+class FabricaEspia:
+    """landmarker_factory que registra se o modelo chegou a ser aberto."""
+
+    def __init__(self):
+        self.chamadas = 0
+
+    def __call__(self, _model_path):
+        self.chamadas += 1
+        return FakeLandmarker()
+
+
+@pytest.mark.parametrize("low_vis", [-0.1, 1.5, math.nan, math.inf])
+def test_low_vis_fora_do_intervalo_gera_erro(video, fake_model, tmp_path, low_vis):
+    fabrica = FabricaEspia()
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match="low_vis") as exc:
+        extract(video, out, fake_model, stance="southpaw", low_vis=low_vis,
+                landmarker_factory=fabrica)
+    assert "entre 0 e 1" in str(exc.value)
+    assert fabrica.chamadas == 0
+    # A validação acontece antes de qualquer escrita
+    assert not out.exists()
+
+
+def test_low_vis_invalido_preserva_saida_anterior(video, fake_model, tmp_path):
+    out = tmp_path / "out"
+    extract(video, out, fake_model, stance="southpaw", preview=True,
+            landmarker_factory=lambda _: FakeLandmarker())
+    antes = {p.name: p.read_bytes() for p in out.iterdir()}
+
+    with pytest.raises(ValueError, match="low_vis"):
+        extract(video, out, fake_model, stance="southpaw", preview=True, low_vis=1.5,
+                landmarker_factory=lambda _: FakeLandmarker())
+
+    assert {p.name: p.read_bytes() for p in out.iterdir()} == antes
+
+
+@pytest.mark.parametrize("low_vis", [0.0, 1.0])
+def test_low_vis_limites_aceitos(video, fake_model, tmp_path, low_vis):
+    out = tmp_path / "out"
+    extract(video, out, fake_model, stance="southpaw", low_vis=low_vis,
+            landmarker_factory=lambda _: FakeLandmarker())
+    assert read_meta(out)["limite_visibilidade"] == low_vis
+
+
 # CSV
 
 def test_csv_tem_uma_linha_por_frame(run_extract):
@@ -166,6 +213,46 @@ def test_fps_zero_gera_erro_explicito(monkeypatch, fake_model, tmp_path):
     with pytest.raises(ValueError, match="FPS"):
         extract(tmp_path / "clip.mp4", tmp_path / "out", fake_model, stance="southpaw",
                 landmarker_factory=lambda _: pytest.fail("não deveria abrir o modelo"))
+
+
+# Total de frames declarado pelo contêiner
+
+def test_meta_registra_frames_declarados(run_extract):
+    _, _, out = run_extract("southpaw")
+    meta = read_meta(out)
+    assert meta["frames_declarados"] == 10
+    assert meta["frames"] == 10
+
+
+def test_frames_declarados_diferente_dos_lidos(fake_capture, video, fake_model, tmp_path):
+    # O contêiner declara 8 frames, mas o decoder entrega só 6
+    fake_capture([0.0, 33.3, 66.7, 100.0, 133.3, 166.7], frame_count=8.0)
+    extract(video, tmp_path / "out", fake_model, stance="southpaw",
+            landmarker_factory=lambda _: FakeLandmarker())
+    meta = read_meta(tmp_path / "out")
+    assert meta["frames_declarados"] == 8
+    assert meta["frames"] == 6
+
+
+@pytest.mark.parametrize("frame_count", [0.0, -1.0, math.nan, math.inf, 7.5])
+def test_frames_declarados_invalido_vira_null(fake_capture, video, fake_model, tmp_path,
+                                              frame_count):
+    pos_msec = [0.0, 33.3, 66.7]
+    fake_capture(pos_msec)
+    extract(video, tmp_path / "ref", fake_model, stance="southpaw",
+            landmarker_factory=lambda _: FakeLandmarker())
+
+    fake_capture(pos_msec, frame_count=frame_count)
+    extract(video, tmp_path / "out", fake_model, stance="southpaw",
+            landmarker_factory=lambda _: FakeLandmarker())
+
+    meta = read_meta(tmp_path / "out")
+    assert meta["frames_declarados"] is None
+    assert meta["frames"] == 3
+    # A extração segue completa e o CSV não muda
+    assert (tmp_path / "out" / "clip_landmarks.csv").read_bytes() == (
+        tmp_path / "ref" / "clip_landmarks.csv"
+    ).read_bytes()
 
 
 # Timestamp real do frame (docs/resultados/fps-variavel.md)
@@ -298,6 +385,62 @@ def test_execucao_separada_do_meta(run_extract):
 def test_preview_gerado(run_extract):
     _, _, out = run_extract("southpaw", preview=True)
     assert (out / "clip_preview.mp4").stat().st_size > 0
+
+
+class WriterQueNaoAbre:
+    """VideoWriter que falha ao abrir, mas deixa um arquivo vazio no caminho, como o OpenCV pode fazer."""
+
+    instancias = []
+
+    def __init__(self, path, *args):
+        Path(path).write_bytes(b"")
+        self.liberado = False
+        WriterQueNaoAbre.instancias.append(self)
+
+    def isOpened(self):
+        return False
+
+    def write(self, frame):
+        pass
+
+    def release(self):
+        self.liberado = True
+
+
+@pytest.fixture
+def writer_que_nao_abre(monkeypatch):
+    WriterQueNaoAbre.instancias = []
+    monkeypatch.setattr(extract_mod.cv2, "VideoWriter", WriterQueNaoAbre)
+    return WriterQueNaoAbre
+
+
+def test_preview_writer_nao_abriu_gera_erro(fake_capture, video, fake_model, tmp_path,
+                                            writer_que_nao_abre):
+    cap = fake_capture(PTS_COM_FRAME_PERDIDO)
+    fabrica = FabricaEspia()
+    out = tmp_path / "out"
+    with pytest.raises(RuntimeError, match="preview"):
+        extract(video, out, fake_model, stance="southpaw", preview=True,
+                landmarker_factory=fabrica)
+    assert fabrica.chamadas == 0
+    assert cap.liberado
+    assert all(w.liberado for w in writer_que_nao_abre.instancias)
+    # Nenhum arquivo, temporário ou final, sobra na pasta de saída
+    assert list(out.iterdir()) == []
+
+
+def test_preview_writer_nao_abriu_preserva_saida_anterior(monkeypatch, fake_capture, video,
+                                                          fake_model, tmp_path):
+    out = tmp_path / "out"
+    run_fake_capture(fake_capture, video, out, fake_model, PTS_COM_FRAME_PERDIDO, preview=True)
+    antes = {p.name: p.read_bytes() for p in out.iterdir()}
+
+    monkeypatch.setattr(extract_mod.cv2, "VideoWriter", WriterQueNaoAbre)
+    with pytest.raises(RuntimeError, match="preview"):
+        run_fake_capture(fake_capture, video, out, fake_model, PTS_COM_FRAME_PERDIDO,
+                         preview=True)
+
+    assert {p.name: p.read_bytes() for p in out.iterdir()} == antes
 
 
 @pytest.mark.parametrize("stance", BASES)

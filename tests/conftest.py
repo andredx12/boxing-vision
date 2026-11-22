@@ -97,8 +97,10 @@ def fake_model(tmp_path) -> Path:
 class FakeCapture:
     """VideoCapture com o tempo de cada frame (CAP_PROP_POS_MSEC) definido por roteiro."""
 
-    def __init__(self, pos_msec, fps=30.0, width=64, height=48):
+    def __init__(self, pos_msec, fps=30.0, width=64, height=48, frame_count=None):
         self.pos_msec = list(pos_msec)
+        # Total declarado pelo contêiner; por padrão, igual ao de frames entregues
+        self.frame_count = float(len(self.pos_msec)) if frame_count is None else frame_count
         self.fps = fps
         self.width = width
         self.height = height
@@ -121,6 +123,8 @@ class FakeCapture:
             return self.width
         if prop == cv2.CAP_PROP_FRAME_HEIGHT:
             return self.height
+        if prop == cv2.CAP_PROP_FRAME_COUNT:
+            return self.frame_count
         if prop == cv2.CAP_PROP_POS_MSEC:
             # Como no OpenCV: depois de read(), o tempo do frame que acabou de ser lido
             return self.pos_msec[self.frames_lidos - 1] if self.frames_lidos else 0.0
